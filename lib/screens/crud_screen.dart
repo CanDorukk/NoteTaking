@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:notetaking/screens/login_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class CrudScreen extends StatefulWidget {
   @override
@@ -11,41 +12,53 @@ class CrudScreen extends StatefulWidget {
 class _CrudScreenState extends State<CrudScreen> {
   final FirebaseFirestore _fireStore = FirebaseFirestore.instance;
   final TextEditingController _controller = TextEditingController();
+  String? _userId; // Kullanıcı kimliği (misafir veya giriş yapan)
 
   @override
   void initState() {
     super.initState();
-    // Kullanıcı giriş yapmamışsa giriş ekranına yönlendir
+
+    // Giriş yapmamışsa, misafir kimliğini `shared_preferences` ile al
+    _getUserId();
+  }
+
+  // Misafir kullanıcı kimliğini almak veya oluşturmak
+  Future<void> _getUserId() async {
     if (FirebaseAuth.instance.currentUser == null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => LoginScreen()), // Giriş ekranı
-        );
-      });
+      // Firebase giriş yapmamışsa, shared_preferences'ten misafir kimliğini al
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      _userId = prefs.getString('guest_id');
+
+      if (_userId == null) {
+        // Misafir kimliği yoksa, yeni bir UUID oluştur ve shared_preferences'e kaydet
+        _userId = DateTime.now().millisecondsSinceEpoch.toString(); // Benzersiz kimlik
+        prefs.setString('guest_id', _userId!); // Kimliği sakla
+      }
+    } else {
+      // Giriş yapmışsa, Firebase kullanıcı kimliği al
+      _userId = FirebaseAuth.instance.currentUser!.uid;
     }
   }
 
-  // Veri ekleme fonksiyonu (Sadece giriş yapmış kullanıcı ekleyebilir)
+  // Veri ekleme fonksiyonu
   Future<void> _createItem(String value) async {
-    User? user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      print("Kullanıcı giriş yapmamış!");
+    if (_userId == null) {
+      print("Kullanıcı kimliği belirlenmemiş!");
       return;
     }
 
     await _fireStore.collection("items").add({
       'name': value,
-      'userId': user.uid, // Kullanıcı kimliği eklendi
+      'userId': _userId,  // Misafir veya giriş yapmış kullanıcı kimliği
     });
   }
 
-  // veritabanınına item güncelleme
+  // Veritabanına item güncelleme
   Future<void> _updateItems(String id, String newValue) async {
     await _fireStore.collection("items").doc(id).update({'name': newValue});
   }
 
-  // veritabanınından item silme
+  // Veritabanından item silme
   Future<void> _deleteItems(String id) async {
     await _fireStore.collection("items").doc(id).delete();
   }
@@ -113,20 +126,11 @@ class _CrudScreenState extends State<CrudScreen> {
               child: Text('Ekle')),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-                stream: FirebaseAuth.instance.currentUser != null
-                    ? _fireStore
+                stream: _fireStore
                     .collection('items')
-                    .where('userId',
-                    isEqualTo:
-                    FirebaseAuth.instance.currentUser!.uid)
-                    .snapshots()
-                    : Stream.empty(), // Kullanıcı giriş yapmamışsa boş stream döndür
+                    .where('userId', isEqualTo: _userId)  // Misafir veya giriş yapmış kullanıcı kimliği ile filtrele
+                    .snapshots(),
                 builder: (context, snapshots) {
-                  // Kullanıcı giriş yapmamışsa uyarı ver
-                  if (FirebaseAuth.instance.currentUser == null) {
-                    return Center(child: Text('Lütfen giriş yapın'));
-                  }
-
                   if (snapshots.connectionState == ConnectionState.waiting) {
                     return Center(child: CircularProgressIndicator());
                   }
@@ -138,8 +142,7 @@ class _CrudScreenState extends State<CrudScreen> {
                   }
 
                   // Veri yoksa gösterilecek mesaj
-                  if (snapshots.hasData == false ||
-                      snapshots.data!.docs.isEmpty) {
+                  if (snapshots.hasData == false || snapshots.data!.docs.isEmpty) {
                     return Center(
                       child: Text("Henüz veri yok"),
                     );

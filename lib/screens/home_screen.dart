@@ -1,8 +1,9 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:notetaking/core/LocaleManager.dart';
 import 'package:notetaking/core/ThemeManager.dart';
 import 'package:notetaking/screens/crud_screen.dart';
-import 'package:notetaking/screens/proife_screen.dart';
+import 'package:notetaking/screens/login_screen.dart';
 import 'package:notetaking/screens/settings_screen.dart';
 import 'package:notetaking/widget/bottom_nav_bar.dart';
 import 'package:provider/provider.dart';
@@ -17,16 +18,47 @@ class _HomeScreenState extends State<HomeScreen>{
 
   final List<Widget> _screens = [
     Center(child: Text('Ana Sayfa', style: TextStyle(fontSize: 24))),
-    ProfileScreen(),
     SettingsScreen(),
     CrudScreen()
   ];
 
   void _onItemTapped(int index) async{
-    setState(() {
-      _selectedIndex = index;
-    });
+    final localManager = Provider.of<LocalManager>(context, listen: false); // 🔹 listen: false ekledik
+    if(index == 3){  // Profil ekranı seçildiğinde
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if(currentUser == null){
+        // Eğer kullanıcı giriş yapmadıysa SnackBar göster ve sonra LoginScreen'e yönlendir
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(localManager.translate("loginization_message")),
+            duration: Duration(milliseconds: 1000),
+          ),
+        );
+
+        // Kullanıcıyı LoginScreen'e yönlendiriyoruz
+        Future.delayed(Duration(milliseconds: 1000), () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => LoginScreen()),
+          );
+        });
+      }else{
+        setState(() {
+          _selectedIndex = index;
+        });
+      }
+    }else{
+      setState(() {
+        _selectedIndex = index;
+      });
+    }
+
   }
+
+
+
+
+
   @override
   Widget build(BuildContext context) {
     final localManager = Provider.of<LocalManager>(context);
@@ -90,6 +122,61 @@ class _HomeScreenState extends State<HomeScreen>{
                 ],
               ),
             ),
+            SizedBox(height: 16,),
+            // 📌 Giriş Yap & Çıkış Yap Butonu
+            StreamBuilder<User?>(
+              stream: FirebaseAuth.instance.authStateChanges(),
+              builder: (context, snapshot) {
+                final user = snapshot.data;
+                return Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      user == null
+                          ? ElevatedButton(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (context) => LoginScreen()),
+                          );
+                        },
+                        child: Text(localManager.translate('login')),
+                      )
+                          : ElevatedButton(
+                        onPressed: () async {
+                          // 1. "Çıkış yapılıyor..." mesajını göster
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(localManager.translate('logging_out')),
+                              duration: Duration(milliseconds: 1500), // 1.5 saniye
+                            ),
+                          );
+
+                          await Future.delayed(Duration(milliseconds: 1500));
+
+                          // 2. Firebase'den çıkış yap
+                          await FirebaseAuth.instance.signOut();
+
+                          setState(() {
+                            _selectedIndex = 0; // Ana Sayfa'ya dön
+                          });
+
+                          // 3. "Başarıyla çıkış yapıldı." mesajını göster
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(localManager.translate('logout_success')),
+                              duration: Duration(milliseconds: 1500), // 1.5 saniye
+                            ),
+                          );
+                        },
+                        child: Text(localManager.translate('logout')),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
           ],
         ),
       ),
@@ -108,7 +195,6 @@ class _HomeScreenState extends State<HomeScreen>{
           ),
 
           // ekranların açılma sırası aşşağıda
-          ProfileScreen(),
           SettingsScreen(),
           CrudScreen(),
         ],
